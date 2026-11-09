@@ -17,10 +17,9 @@
     if (A) { d.style.setProperty("--g1", A[0]); d.style.setProperty("--g2", A[1]); d.style.setProperty("--acc-rgb", A[2]); }
   })();
 </script>
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<!-- шрифты грузятся фоном и не блокируют показ страницы -->
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 <style>
   :root {
     --bg: #080810;
@@ -499,10 +498,29 @@
 <div class="toast" id="toast"></div>
 
 <script>
+// Внешние скрипты (Telegram и QR-код) грузим фоном: если какой-то сайт тормозит,
+// приложение всё равно показывается, а не висит чёрным экраном.
+function loadScript(src, ms) {
+  return new Promise(function (resolve) {
+    var done = false, finish = function (ok) { if (!done) { done = true; resolve(ok); } };
+    var s = document.createElement("script");
+    s.src = src; s.async = true;
+    s.onload = function () { finish(true); };
+    s.onerror = function () { finish(false); };
+    document.head.appendChild(s);
+    setTimeout(function () { finish(false); }, ms);
+  });
+}
+Promise.all([
+  loadScript("https://telegram.org/js/telegram-web-app.js", 5000),
+  loadScript("https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js", 5000),
+]).then(main, main);
+
+function main() {
   // ================== НАСТРОЙКИ ==================
-  const APP_VERSION = "4";     // показывается внизу профиля — чтобы видеть, что загрузилась новая версия
+  const APP_VERSION = "5";    // показывается внизу профиля — чтобы видеть, что загрузилась новая версия
   const RUB_RATE = 98;         // курс: сколько ₽ за 1 USDT при выводе на карту
-  const SUPPORT  = "tcukim1";   // ник поддержки без @
+  const SUPPORT  = "Palassu";   // ник поддержки без @
   const NETWORKS = [
     { id: "usdt_trc20", chain: "TRC-20", full: "TRC20 (Tron)", address: "TSXsDZHdcpsJPzS2yk4tYCoQcMrjHyxP2Y",
       min: 10, addrRe: /^T[1-9A-HJ-NP-Za-km-z]{33}$/, addrHint: "адрес Tron начинается с T, 34 символа" },
@@ -949,6 +967,7 @@
     applyAvatar();
     show("home");
   })();
+}
 </script>
 </body>
 </html>
