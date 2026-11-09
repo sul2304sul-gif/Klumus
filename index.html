@@ -1,0 +1,954 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Wallet</title>
+<script>
+  // применяем тему и акцент до первой отрисовки — без мигания
+  (function () {
+    var t = "dark", a = "violet";
+    try { t = localStorage.getItem("ui_theme") === "light" ? "light" : "dark"; a = localStorage.getItem("ui_accent") || "violet"; } catch (e) {}
+    var d = document.documentElement;
+    d.setAttribute("data-theme", t);
+    var A = { violet: ["#9d7bff", "#4f7bff", "157,123,255"], teal: ["#5ff0c8", "#39b0ff", "95,240,200"],
+              green: ["#6ee787", "#2bc0a8", "110,231,135"], orange: ["#ffb45f", "#ff6f91", "255,180,95"],
+              pink: ["#ff8fd0", "#a86bff", "255,143,208"] }[a];
+    if (A) { d.style.setProperty("--g1", A[0]); d.style.setProperty("--g2", A[1]); d.style.setProperty("--acc-rgb", A[2]); }
+  })();
+</script>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #080810;
+    --bg2: #10111c;
+    --card: rgba(255,255,255,.04);
+    --stroke: rgba(255,255,255,.09);
+    --text: #f3f2fa;
+    --hint: #8f8ca6;
+    --g1: #9d7bff;
+    --g2: #4f7bff;
+    --acc-rgb: 157,123,255;
+    --grad: linear-gradient(135deg, var(--g1), var(--g2));
+    --on-acc: #0b0b16;
+    --warn: #f5b942;
+    --bad: #ff8f8f;
+    --glow: #17132a;
+    --bal1: #19152b; --bal2: #0d0d16;
+    --bar: rgba(18,16,30,.86);
+    --toast: rgba(24,22,38,.96);
+  }
+  html[data-theme="light"] {
+    --bg: #f4f4f8; --bg2: #ffffff;
+    --card: rgba(0,0,0,.045); --stroke: rgba(0,0,0,.10);
+    --text: #14141c; --hint: #6b6b7a; --glow: #e9e5f7;
+    --bal1: #ffffff; --bal2: #eef0f6;
+    --bar: rgba(255,255,255,.86);
+    --toast: rgba(255,255,255,.97);
+    --bad: #e05555;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { min-height: 100%; }
+  html { background: var(--bg); color-scheme: dark; }
+  html[data-theme="light"] { color-scheme: light; }
+  /* подсветка сверху — отдельным слоем: фон с "fixed" на iPhone перерисовывается с задержкой */
+  body::before {
+    content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+    background: radial-gradient(120% 60% at 50% 0%, var(--glow) 0%, var(--bg) 58%);
+  }
+  body {
+    background: transparent;
+    color: var(--text);
+    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    overflow-x: hidden;
+  }
+  button { font-family: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+  svg.i { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+  .screen { display: none; padding: 14px 16px 120px; }
+  .screen.active { display: block; animation: fade .22s ease; }
+  @keyframes fade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+  .display { font-family: Unbounded, sans-serif; letter-spacing: -.5px; }
+  h1 { font-family: Unbounded, sans-serif; font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+  .sub { color: var(--hint); font-size: 14px; margin-bottom: 18px; line-height: 1.4; }
+  .label { color: var(--hint); font-size: 12px; margin: 22px 0 10px; text-transform: uppercase; letter-spacing: .6px; }
+  .hint-note { color: var(--hint); font-size: 12px; line-height: 1.45; margin-top: 10px; }
+
+  /* ---------- шапка ---------- */
+  .header { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+  .avatar {
+    width: 50px; height: 50px; border-radius: 50%; background: var(--grad); color: var(--on-acc);
+    display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 20px; overflow: hidden; flex-shrink: 0;
+  }
+  .avatar img { width: 100%; height: 100%; object-fit: cover; }
+  .who { flex: 1; min-width: 0; }
+  .who .name { font-weight: 600; font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .who .small { color: var(--hint); font-size: 13px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .icon-btn {
+    width: 42px; height: 42px; border-radius: 50%; border: 1px solid var(--stroke); background: var(--card);
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .icon-btn svg.i { width: 19px; height: 19px; }
+
+  /* ---------- баланс ---------- */
+  .balance {
+    position: relative; overflow: hidden;
+    border: 1px solid var(--stroke); border-radius: 26px; padding: 20px;
+    background: linear-gradient(160deg, var(--bal1), var(--bal2));
+  }
+  .balance::after {
+    content: ""; position: absolute; right: -60px; top: -40px; width: 240px; height: 240px;
+    background: radial-gradient(circle, rgba(var(--acc-rgb), .28), transparent 65%); pointer-events: none;
+  }
+  html[data-theme="light"] .balance::after { background: radial-gradient(circle, rgba(var(--acc-rgb), .18), transparent 65%); }
+  .chip {
+    display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px 7px 8px;
+    border: 1px solid var(--stroke); border-radius: 999px; background: var(--card); font-weight: 600; font-size: 14px;
+  }
+  .coin { width: 22px; height: 22px; border-radius: 50%; background: #26a17b; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; color: #fff; flex-shrink: 0; }
+  .chip .net { color: var(--hint); font-weight: 500; }
+  .amount { font-size: 50px; font-weight: 800; margin: 14px 0 10px; line-height: 1; word-break: break-all; }
+  .frac { color: var(--hint); }
+  .stats { display: flex; gap: 22px; color: var(--hint); font-size: 14px; flex-wrap: wrap; }
+  .stats b { color: var(--text); font-weight: 600; margin-left: 4px; }
+
+  /* ---------- круглые действия ---------- */
+  .actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 22px 0 6px; }
+  .act { display: flex; flex-direction: column; align-items: center; gap: 9px; font-size: 13px; font-weight: 500; }
+  .act .circle {
+    width: 60px; height: 60px; border-radius: 50%; background: var(--grad); color: var(--on-acc);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 6px 22px rgba(var(--acc-rgb), .3);
+    transition: transform .12s;
+  }
+  .act:active .circle { transform: scale(.92); }
+  .act .circle svg.i { width: 24px; height: 24px; stroke-width: 2.4; }
+
+  /* ---------- плитки ---------- */
+  .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 20px; }
+  .tile {
+    border: 1px solid var(--stroke); background: var(--card); border-radius: 20px; padding: 14px 12px; text-align: left;
+    display: flex; flex-direction: column; gap: 4px; min-height: 118px;
+  }
+  .tile:active { opacity: .75; }
+  .tile .t-ico { color: var(--g1); margin-bottom: auto; }
+  .tile .t-ico svg.i { width: 26px; height: 26px; }
+  .tile .t-ttl { font-weight: 600; font-size: 15px; }
+  .tile .t-sub { color: var(--hint); font-size: 12px; line-height: 1.3; }
+
+  /* ---------- блок telegram ---------- */
+  .tg-card { border: 1px solid var(--stroke); background: var(--card); border-radius: 20px; padding: 16px; margin-top: 10px; }
+  .tg-card .tg-ttl { font-weight: 600; font-size: 15px; margin-bottom: 6px; }
+  .tg-card .tg-txt { color: var(--hint); font-size: 13px; line-height: 1.45; }
+  .tg-card.warn-card { border-color: rgba(245,185,66,.35); background: rgba(245,185,66,.07); }
+  .tg-card.warn-card .tg-txt { color: var(--warn); }
+
+  /* ---------- личный кабинет ---------- */
+  .acct { display: flex; align-items: center; gap: 14px; border: 1px solid var(--stroke); background: var(--card); border-radius: 20px; padding: 16px; }
+  .acct .avatar { width: 56px; height: 56px; font-size: 22px; }
+  .acct-info { min-width: 0; }
+  .acct-name { font-weight: 600; font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .acct-handle { color: var(--hint); font-size: 13px; margin-top: 2px; }
+  .acct-rows { margin-top: 12px; border: 1px solid var(--stroke); background: var(--card); border-radius: 20px; overflow: hidden; }
+  .arow { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; font-size: 14px; gap: 12px; }
+  .arow + .arow { border-top: 1px solid var(--stroke); }
+  .arow span { color: var(--hint); }
+  .arow b { font-weight: 600; text-align: right; }
+
+  /* ---------- профиль ---------- */
+  .profile-hero { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 10px 0 2px; }
+  .avatar-edit { position: relative; display: inline-block; }
+  .avatar-edit .avatar { width: 92px; height: 92px; font-size: 36px; }
+  .avatar-cam { position: absolute; right: -2px; bottom: -2px; width: 32px; height: 32px; border-radius: 50%; background: var(--grad); color: var(--on-acc); display: flex; align-items: center; justify-content: center; border: 3px solid var(--bg); }
+  .avatar-cam svg.i { width: 16px; height: 16px; stroke-width: 2.4; }
+  .prof-name { font-weight: 700; font-size: 21px; margin-top: 14px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .prof-handle { color: var(--hint); font-size: 13px; margin-top: 3px; }
+  .prof-stats { display: grid; grid-template-columns: repeat(3, 1fr); margin-top: 20px; border: 1px solid var(--stroke); background: var(--card); border-radius: 20px; padding: 18px 0; }
+  .pstat { text-align: center; padding: 0 6px; min-width: 0; }
+  .pstat + .pstat { border-left: 1px solid var(--stroke); }
+  .pstat .pv { font-family: Unbounded, sans-serif; font-weight: 700; font-size: 17px; letter-spacing: -.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pstat .pl { color: var(--hint); font-size: 11px; margin-top: 5px; }
+  .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; background: var(--card); border: 1px solid var(--stroke); border-radius: 14px; padding: 4px; }
+  .seg-btn { padding: 11px; border-radius: 10px; font-size: 14px; font-weight: 600; color: var(--hint); }
+  .seg-btn.active { background: var(--grad); color: var(--on-acc); }
+  .swatches { display: flex; gap: 14px; flex-wrap: wrap; }
+  .sw { width: 42px; height: 42px; border-radius: 50%; border: 2px solid transparent; outline: 2px solid transparent; outline-offset: 2px; }
+  .sw.active { outline-color: var(--text); }
+
+  /* ---------- сделки ---------- */
+  .deal { border: 1px solid var(--stroke); background: var(--card); border-radius: 18px; padding: 14px 16px; }
+  .deal + .deal { margin-top: 10px; }
+  .deal-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; gap: 8px; }
+  .badge { font-size: 12px; font-weight: 600; padding: 5px 10px; border-radius: 999px; white-space: nowrap; }
+  .st-wait { color: #f5b942; background: rgba(245,185,66,.14); }
+  .st-done { color: #3fcf86; background: rgba(63,207,134,.14); }
+  .st-rej  { color: var(--bad); background: rgba(255,143,143,.14); }
+  .deal-date { color: var(--hint); font-size: 12px; }
+  .deal-amt { font-size: 18px; font-weight: 700; margin-bottom: 12px; }
+  .deal-amt .arrow { color: var(--hint); margin: 0 6px; }
+  .deal-rows { display: flex; flex-direction: column; gap: 6px; }
+  .deal-rows > div { display: flex; justify-content: space-between; font-size: 13px; gap: 12px; }
+  .deal-rows span { color: var(--hint); flex-shrink: 0; }
+  .deal-rows b { font-weight: 600; text-align: right; word-break: break-all; }
+
+  /* ---------- курс ---------- */
+  .rate-box { border: 1px solid var(--stroke); background: var(--card); border-radius: 16px; padding: 14px 16px; margin-top: 10px; }
+  .rate-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  .rate-top span { color: var(--hint); font-size: 14px; }
+  .rate-top b { font-size: 24px; font-weight: 800; }
+  .rate-note { color: var(--hint); font-size: 12px; margin-top: 6px; }
+
+  /* ---------- история ---------- */
+  .ops { display: flex; flex-direction: column; gap: 10px; }
+  .op { display: flex; align-items: center; gap: 12px; border: 1px solid var(--stroke); background: var(--card); border-radius: 16px; padding: 12px 14px; }
+  .op .op-ico { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; background: var(--card); }
+  .op .op-ico.in { color: var(--g1); }
+  .op .op-ico.out { color: var(--bad); }
+  .op .op-main { flex: 1; min-width: 0; }
+  .op .op-ttl { font-weight: 600; font-size: 15px; }
+  .op .op-sub { color: var(--hint); font-size: 12px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .op .op-amt { font-weight: 700; font-size: 15px; white-space: nowrap; }
+  .op .op-amt.in { color: var(--g1); }
+  .op .op-amt.out { color: var(--bad); }
+
+  /* ---------- пусто ---------- */
+  .empty { border: 1px solid var(--stroke); background: var(--card); border-radius: 22px; padding: 44px 16px; text-align: center; color: var(--hint); }
+  .empty .ico { width: 56px; height: 56px; border-radius: 50%; margin: 0 auto 12px; background: var(--grad); color: var(--on-acc); display: flex; align-items: center; justify-content: center; }
+
+  /* ---------- пополнение / вывод ---------- */
+  .networks { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .net-btn {
+    border: 1.5px solid var(--stroke); background: var(--card); border-radius: 18px; padding: 14px; text-align: left;
+    display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 15px;
+  }
+  .net-btn small { display: block; color: var(--hint); font-weight: 500; font-size: 12px; margin-top: 2px; }
+  .net-btn .coin { width: 30px; height: 30px; font-size: 14px; }
+  .net-btn.active { border-color: transparent; background: linear-gradient(var(--bg2), var(--bg2)) padding-box, var(--grad) border-box; }
+  .qr-card { border: 1px solid var(--stroke); background: var(--card); border-radius: 24px; padding: 18px; text-align: center; }
+  #qr { display: inline-block; background: #fff; padding: 12px; border-radius: 18px; margin-bottom: 14px; min-width: 204px; min-height: 204px; }
+  #qr img, #qr canvas { display: block; }
+  .addr { font-family: ui-monospace, Menlo, monospace; font-size: 14px; word-break: break-all; margin-bottom: 14px; color: var(--text); }
+  .btn {
+    width: 100%; border-radius: 16px; padding: 15px; background: var(--grad); color: var(--on-acc);
+    font-size: 15px; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 8px;
+  }
+  .btn:active { opacity: .85; }
+  .warn {
+    margin-top: 14px; font-size: 13px; color: var(--warn); background: rgba(245,185,66,.08);
+    border: 1px solid rgba(245,185,66,.25); border-radius: 14px; padding: 11px 12px; text-align: left; line-height: 1.45;
+  }
+  input {
+    width: 100%; background: var(--card); color: var(--text); border: 1px solid var(--stroke);
+    border-radius: 16px; padding: 14px; font-size: 16px; outline: none; font-family: inherit;
+  }
+  input::placeholder { color: var(--hint); }
+  input:focus { border-color: var(--g1); }
+  .fields { display: grid; gap: 10px; }
+
+  .scr-back { display: inline-flex; align-items: center; gap: 6px; color: var(--hint); font-size: 14px; font-weight: 500; margin-bottom: 14px; padding: 6px 2px; }
+  .scr-back:active { color: var(--text); }
+  .scr-back svg.i { width: 20px; height: 20px; }
+
+  /* ---------- нижнее меню ---------- */
+  .tabbar {
+    position: fixed; left: 12px; right: 12px; bottom: calc(10px + env(safe-area-inset-bottom));
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 2px;
+    background: var(--bar); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+    border: 1px solid var(--stroke); border-radius: 28px; padding: 6px; z-index: 10;
+  }
+  .tabbar.hidden, body.kb .tabbar { display: none; }
+  .tab { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 9px 0; color: var(--hint); font-size: 11px; font-weight: 500; border-radius: 22px; min-width: 0; }
+  .tab.active { background: var(--grad); color: var(--on-acc); font-weight: 600; }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 110px; transform: translateX(-50%); max-width: calc(100% - 32px);
+    background: var(--toast); border: 1px solid var(--stroke); color: var(--text); padding: 11px 18px; border-radius: 14px;
+    font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 30; text-align: center;
+  }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<!-- ===== ГЛАВНАЯ ===== -->
+<section class="screen active" id="home">
+  <div class="header">
+    <div class="avatar" id="avatar">?</div>
+    <div class="who">
+      <div class="name" id="uname">Гость</div>
+      <div class="small" id="uhandle">Клиент</div>
+    </div>
+    <button class="icon-btn" data-go="history" aria-label="История"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></button>
+    <button class="icon-btn" id="supportBtn" aria-label="Поддержка"><svg class="i" viewBox="0 0 24 24"><path d="M4 14v-2a8 8 0 0 1 16 0v2"/><rect x="3" y="14" width="4" height="6" rx="1.5"/><rect x="17" y="14" width="4" height="6" rx="1.5"/></svg></button>
+    <button class="icon-btn" data-go="requisites" aria-label="Вывод на карту"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18M7 15h4"/></svg></button>
+  </div>
+
+  <div class="balance">
+    <div class="chip"><span class="coin">₮</span>USDT <span class="net">TRC-20 · BEP-20</span></div>
+    <div class="amount display" id="balAmount">0<span class="frac">,00</span></div>
+    <div class="stats">
+      <span>Внесено<b id="balIn">0,00</b></span>
+      <span>Выведено<b id="balOut">0,00</b></span>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="act" data-open="deposit">
+      <span class="circle"><svg class="i" viewBox="0 0 24 24"><path d="M12 4v16M5 13l7 7 7-7"/></svg></span>Пополнить
+    </button>
+    <button class="act" data-open="withdraw">
+      <span class="circle"><svg class="i" viewBox="0 0 24 24"><path d="M12 20V4M5 11l7-7 7 7"/></svg></span>Вывести
+    </button>
+    <button class="act" data-go="deals">
+      <span class="circle"><svg class="i" viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg></span>Сделки
+    </button>
+    <button class="act" data-go="requisites">
+      <span class="circle"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18M7 15h4"/></svg></span>Реквизиты
+    </button>
+  </div>
+
+  <div class="tiles">
+    <button class="tile" data-open="deposit">
+      <span class="t-ico"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18M7 15h4"/></svg></span>
+      <span class="t-ttl">Кошелёк</span>
+      <span class="t-sub">Пополнить USDT ›</span>
+    </button>
+    <button class="tile" data-go="deals">
+      <span class="t-ico"><svg class="i" viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg></span>
+      <span class="t-ttl">Сделки</span>
+      <span class="t-sub">Обмен на ₽ ›</span>
+    </button>
+    <button class="tile" data-go="history">
+      <span class="t-ico"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
+      <span class="t-ttl">История</span>
+      <span class="t-sub">Все операции ›</span>
+    </button>
+  </div>
+
+  <div class="tg-card" id="tgCard">
+    <div class="tg-ttl">Telegram</div>
+    <div class="tg-txt" id="tgLink"></div>
+  </div>
+</section>
+
+<!-- ===== СДЕЛКИ ===== -->
+<section class="screen" id="deals">
+  <h1>Сделки</h1>
+  <p class="sub">Ваши обмены USDT → рубли</p>
+  <div class="ops" id="dealsList"></div>
+</section>
+
+<!-- ===== ИСТОРИЯ ===== -->
+<section class="screen" id="history">
+  <button class="scr-back" data-back><svg class="i" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>Назад</button>
+  <h1>История операций</h1>
+  <p class="sub">Пополнения, выводы и обмены</p>
+  <div class="ops" id="histList"></div>
+</section>
+
+<!-- ===== ЛИЧНЫЙ КАБИНЕТ ===== -->
+<section class="screen" id="cabinet">
+  <h1>Личный кабинет</h1>
+  <p class="sub">Вход выполняется через Telegram</p>
+  <div class="acct">
+    <div class="avatar" id="cabAv">?</div>
+    <div class="acct-info">
+      <div class="acct-name" id="cabName">Гость</div>
+      <div class="acct-handle" id="cabHandle">—</div>
+    </div>
+  </div>
+  <div class="acct-rows">
+    <div class="arow"><span>Telegram</span><b id="cabTg">не привязан</b></div>
+    <div class="arow"><span>ID аккаунта</span><b id="cabId">—</b></div>
+    <div class="arow"><span>Баланс</span><b id="cabBal">0,00 USDT</b></div>
+  </div>
+  <p class="hint-note">Вход в аккаунт происходит автоматически через Telegram — пароли и почта не нужны.</p>
+</section>
+
+<!-- ===== РЕКВИЗИТЫ / ВЫВОД НА КАРТУ ===== -->
+<section class="screen" id="requisites">
+  <h1>Вывод на карту ₽</h1>
+  <p class="sub">Оставьте заявку — переведём рубли по СБП вручную. Писать в личку не нужно.</p>
+
+  <div class="label">Сумма к выводу</div>
+  <div class="fields">
+    <input id="rAmount" placeholder="Сумма в USDT" inputmode="decimal" autocomplete="off">
+  </div>
+  <div class="rate-box">
+    <div class="rate-top"><span>К получению</span><b id="rRub">0 ₽</b></div>
+    <div class="rate-note">Курс 1 USDT = <span id="rRate">—</span> ₽ · доступно <span id="rAvail">0,00</span> USDT</div>
+  </div>
+
+  <div class="label">Реквизиты получателя</div>
+  <div class="fields">
+    <input id="rBank" placeholder="Банк (Сбер, Т-Банк, Альфа…)" autocomplete="off">
+    <input id="rPhone" placeholder="Телефон для СБП" inputmode="tel" autocomplete="off">
+    <input id="rFio" placeholder="ФИО получателя (необязательно)" autocomplete="off">
+    <input id="rCard" placeholder="Номер карты (необязательно)" inputmode="numeric" autocomplete="off">
+    <button class="btn" id="rSubmit">Оставить заявку</button>
+  </div>
+  <p class="hint-note">Нужен телефон по СБП или номер карты. Заявку обработает оператор, рубли придут на указанные реквизиты.</p>
+</section>
+
+<!-- ===== ПРОФИЛЬ ===== -->
+<section class="screen" id="profile">
+  <div class="profile-hero">
+    <button class="avatar-edit" id="avatarEdit" aria-label="Сменить аватар">
+      <div class="avatar" id="profAv">?</div>
+      <span class="avatar-cam"><svg class="i" viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></span>
+    </button>
+    <div class="prof-name" id="profName">Гость</div>
+    <div class="prof-handle" id="profHandle">—</div>
+  </div>
+  <input type="file" id="avatarFile" accept="image/*" style="display:none">
+
+  <div class="prof-stats">
+    <div class="pstat"><div class="pv" id="stDeals">0</div><div class="pl">Сделок</div></div>
+    <div class="pstat"><div class="pv" id="stRub">0 ₽</div><div class="pl">Объём&nbsp;₽</div></div>
+    <div class="pstat"><div class="pv" id="stUsdt">0,00</div><div class="pl">Объём&nbsp;USDT</div></div>
+  </div>
+
+  <div id="adminBox" style="display:none">
+    <div class="label">Для оператора</div>
+    <button class="btn" id="globalStats">
+      <svg class="i" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Общая статистика
+    </button>
+    <p class="hint-note">Сколько всего внесли USDT и вывели рублей все пользователи. Приложение закроется, отчёт придёт в чат с ботом. Можно и командой /stats.</p>
+  </div>
+
+  <div class="label">Тема</div>
+  <div class="seg" id="themeSeg">
+    <button class="seg-btn" data-theme-val="dark">Тёмная</button>
+    <button class="seg-btn" data-theme-val="light">Светлая</button>
+  </div>
+
+  <div class="label">Акцент</div>
+  <div class="swatches" id="swatches"></div>
+
+  <p class="hint-note" id="appVer" style="text-align:center;margin-top:28px"></p>
+</section>
+
+<!-- ===== ПОПОЛНЕНИЕ ===== -->
+<section class="screen" id="deposit">
+  <button class="scr-back" data-back><svg class="i" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>Назад</button>
+  <h1>Пополнение</h1>
+  <p class="sub">Принимаем только USDT в сетях TRC20 и BEP20</p>
+
+  <div class="label">Сеть</div>
+  <div class="networks" id="networks"></div>
+
+  <div class="label">Адрес для перевода</div>
+  <div class="qr-card">
+    <div id="qr"></div>
+    <div class="addr" id="addr"></div>
+    <button class="btn" id="copyBtn">
+      <svg class="i" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Скопировать адрес
+    </button>
+    <div class="warn" id="warn"></div>
+  </div>
+
+  <div class="label">После перевода</div>
+  <div class="fields">
+    <input id="txhash" placeholder="TXID или ID внутреннего перевода" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <input id="amount" placeholder="Сумма, USDT" inputmode="decimal" autocomplete="off">
+  </div>
+  <p class="hint-note">Заполните поля и нажмите кнопку «Я отправил» внизу экрана.</p>
+</section>
+
+<!-- ===== ВЫВОД USDT ===== -->
+<section class="screen" id="withdraw">
+  <button class="scr-back" data-back><svg class="i" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>Назад</button>
+  <h1>Вывод USDT</h1>
+  <p class="sub">Передумали? Выведите USDT обратно на свой кошелёк.</p>
+
+  <div class="label">Сеть вывода</div>
+  <div class="networks" id="wNetworks"></div>
+
+  <div class="label">Куда вывести</div>
+  <div class="fields">
+    <input id="wAddr" placeholder="Ваш адрес USDT" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <input id="wAmount" placeholder="Сумма, USDT" inputmode="decimal" autocomplete="off">
+  </div>
+  <div class="rate-note" style="margin-top:8px">Доступно: <span id="wAvail">0,00</span> USDT</div>
+  <div class="warn" id="wWarn"></div>
+</section>
+
+<!-- ===== НИЖНЕЕ МЕНЮ ===== -->
+<nav class="tabbar" id="tabbar">
+  <button class="tab active" data-screen="home">
+    <svg class="i" viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg>Главная
+  </button>
+  <button class="tab" data-screen="deals">
+    <svg class="i" viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg>Сделки
+  </button>
+  <button class="tab" data-screen="cabinet">
+    <svg class="i" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Кабинет
+  </button>
+  <button class="tab" data-screen="requisites">
+    <svg class="i" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18M7 15h4"/></svg>Реквизиты
+  </button>
+  <button class="tab" data-screen="profile">
+    <svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>Профиль
+  </button>
+</nav>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  // ================== НАСТРОЙКИ ==================
+  const APP_VERSION = "4";     // показывается внизу профиля — чтобы видеть, что загрузилась новая версия
+  const RUB_RATE = 98;         // курс: сколько ₽ за 1 USDT при выводе на карту
+  const SUPPORT  = "tcukim1";   // ник поддержки без @
+  const NETWORKS = [
+    { id: "usdt_trc20", chain: "TRC-20", full: "TRC20 (Tron)", address: "TSXsDZHdcpsJPzS2yk4tYCoQcMrjHyxP2Y",
+      min: 10, addrRe: /^T[1-9A-HJ-NP-Za-km-z]{33}$/, addrHint: "адрес Tron начинается с T, 34 символа" },
+    { id: "usdt_bep20", chain: "BEP-20", full: "BEP20 (BSC)", address: "0x57efe408bec9a507ba6c9aef1cff5886dfbf2b9c",
+      min: 10, addrRe: /^0x[0-9a-fA-F]{40}$/, addrHint: "адрес BSC начинается с 0x, 42 символа" },
+  ];
+  // ==============================================
+
+  const $ = id => document.getElementById(id);
+  const tg = window.Telegram?.WebApp;
+
+  // Цвет шапки, фона и нижней полосы Telegram.
+  // Шлём и через обычный API, и напрямую в клиент: если Telegram не передал версию,
+  // обычный API молча отказывается красить, а прямая команда всё равно срабатывает.
+  const HEADER_COLOR = "#080810";   // шапка Telegram — всегда чёрная, при любой теме
+  let chromeBg = "#080810";
+  function paintChrome(bg) {
+    chromeBg = bg;
+    const W = window.Telegram?.WebView;
+    try { tg?.setHeaderColor(HEADER_COLOR); } catch {}
+    try { tg?.setBackgroundColor(bg); } catch {}
+    try { tg?.setBottomBarColor && tg.setBottomBarColor(bg); } catch {}
+    try { W?.postEvent("web_app_set_header_color", false, { color: HEADER_COLOR }); } catch {}
+    try { W?.postEvent("web_app_set_background_color", false, { color: bg }); } catch {}
+    try { W?.postEvent("web_app_set_bottom_bar_color", false, { color: bg }); } catch {}
+  }
+
+  if (tg) {
+    // красим шапку Telegram сразу, до ready(), чтобы она не мелькала старым цветом
+    paintChrome(document.documentElement.getAttribute("data-theme") === "light" ? "#f4f4f8" : "#080810");
+    try { tg.ready(); tg.expand(); } catch {}
+    // некоторые клиенты сбрасывают цвет после загрузки или при смене темы Telegram — красим повторно
+    setTimeout(() => paintChrome(chromeBg), 300);
+    setTimeout(() => paintChrome(chromeBg), 1200);
+    try { tg.onEvent("themeChanged", () => paintChrome(chromeBg)); } catch {}
+    try { tg.disableVerticalSwipes && tg.disableVerticalSwipes(); } catch {}
+  }
+
+  // ---------- кто зашёл ----------
+  // Бот вшивает данные пользователя в ссылку кнопки (?uid=&fn=&un=&adm=),
+  // потому что при запуске с кнопки клавиатуры Telegram не передаёт initData.
+  const qp = new URLSearchParams(location.search);
+  const urlUser = qp.get("uid") ? { id: Number(qp.get("uid")), first_name: qp.get("fn") || "Пользователь", username: qp.get("un") || "" } : null;
+  const user = urlUser || tg?.initDataUnsafe?.user || null;
+  const isAdmin = qp.get("adm") === "1";
+  // внутри Telegram: либо скрипт узнал платформу, либо есть мост в приложение (iOS/Android) или iframe (Desktop/Web)
+  const inTelegram = !!tg && ((tg.platform && tg.platform !== "unknown") || !!window.TelegramWebviewProxy || window.parent !== window);
+  const canSend = inTelegram && !!urlUser;   // sendData работает только при запуске с кнопки бота
+  const NEED_BOT = "Откройте кошелёк кнопкой «💰 Открыть кошелёк» в чате с ботом";
+
+  // ---------- утилиты ----------
+  const r2 = n => Math.round((Number(n) || 0) * 100) / 100;
+  function parseAmt(v) {
+    const s = String(v || "").replace(/\s/g, "").replace(",", ".");
+    if (!/^\d+(\.\d+)?$/.test(s)) return NaN;
+    return r2(parseFloat(s));
+  }
+  function fmt(n) { return r2(n).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function fmtRub(n) { return Math.round(Number(n) || 0).toLocaleString("ru-RU"); }
+  const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const shortAddr = a => a ? esc(a.slice(0, 6) + "…" + a.slice(-4)) : "";
+  const shortCard = c => { const d = String(c).replace(/\D/g, ""); return d.length >= 4 ? "•••• " + d.slice(-4) : esc(c); };
+  const fmtDate = ts => new Date(ts).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const haptic = (kind, v) => { try { tg?.HapticFeedback?.[kind]?.(v); } catch {} };
+
+  function toast(msg) {
+    const t = $("toast");
+    t.textContent = msg; t.classList.add("show");
+    clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("show"), 2200);
+  }
+  function err(m) { haptic("notificationOccurred", "error"); toast(m); }
+
+  // ---------- хранилище (на устройстве пользователя) ----------
+  const uidKey = () => user?.id || "anon";
+  function lsGet(k, def) { try { const v = localStorage.getItem(k); return v === null ? def : v; } catch { return def; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, v); return true; } catch { return false; } }
+
+  function getBal() { return r2(parseFloat(lsGet("bal_" + uidKey(), "0")) || 0); }
+  function setBal(v) { lsSet("bal_" + uidKey(), String(Math.max(0, r2(v)))); }
+  function getLog() { try { const l = JSON.parse(lsGet("log_" + uidKey(), "[]")); return Array.isArray(l) ? l : []; } catch { return []; } }
+  function saveLog(l) { lsSet("log_" + uidKey(), JSON.stringify(l.slice(0, 500))); }
+  function addLog(e) { const l = getLog(); l.unshift(e); saveLog(l); }
+
+  // перенос данных из старой версии приложения (если были)
+  (function migrate() {
+    const oldBal = lsGet("dep_total_" + uidKey(), null), oldLog = lsGet("tx_log_" + uidKey(), null);
+    if (oldBal !== null && lsGet("bal_" + uidKey(), null) === null) lsSet("bal_" + uidKey(), oldBal);
+    if (oldLog !== null && lsGet("log_" + uidKey(), null) === null) lsSet("log_" + uidKey(), oldLog);
+  })();
+
+  // ---------- отправка боту ----------
+  // Вызывать ПОСЛЕ локальных изменений: sendData закрывает мини-апп.
+  function send(payload) {
+    try { tg.sendData(JSON.stringify(payload)); return true; }
+    catch { err("Не удалось отправить заявку, попробуйте ещё раз"); return false; }
+  }
+
+  // ---------- аватар ----------
+  function customAv() { return lsGet("avatar_" + uidKey(), null); }
+  function paintAvatar(el) {
+    if (!el) return;
+    el.textContent = "";
+    const src = customAv() || user?.photo_url;
+    if (src) { const img = new Image(); img.alt = ""; img.src = src; el.appendChild(img); }
+    else el.textContent = ((user?.first_name || "?").trim().charAt(0) || "?").toUpperCase();
+  }
+  function applyAvatar() { ["avatar", "cabAv", "profAv"].forEach(id => paintAvatar($(id))); }
+
+  $("avatarEdit").onclick = () => $("avatarFile").click();
+  $("avatarFile").onchange = e => {
+    const f = e.target.files[0];
+    e.target.value = "";
+    if (!f) return;
+    if (!/^image\//.test(f.type)) return err("Выберите картинку");
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const size = 240, cv = document.createElement("canvas");
+        cv.width = cv.height = size;
+        const s = Math.min(img.width, img.height);
+        cv.getContext("2d").drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, size, size);
+        if (!lsSet("avatar_" + uidKey(), cv.toDataURL("image/jpeg", 0.85))) return err("Не удалось сохранить фото");
+        applyAvatar();
+        haptic("notificationOccurred", "success");
+        toast("Аватар обновлён");
+      };
+      img.onerror = () => err("Не удалось открыть фото");
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(f);
+  };
+
+  // ---------- тема и акцент ----------
+  const ACCENTS = [
+    { id: "violet", g1: "#9d7bff", g2: "#4f7bff" },
+    { id: "teal",   g1: "#5ff0c8", g2: "#39b0ff" },
+    { id: "green",  g1: "#6ee787", g2: "#2bc0a8" },
+    { id: "orange", g1: "#ffb45f", g2: "#ff6f91" },
+    { id: "pink",   g1: "#ff8fd0", g2: "#a86bff" },
+  ];
+  let currentAccent = ACCENTS[0];
+  const hexRgb = h => { const n = parseInt(h.slice(1), 16); return `${n >> 16 & 255},${n >> 8 & 255},${n & 255}`; };
+
+  function applyTheme(t) {
+    if (t !== "light") t = "dark";
+    document.documentElement.setAttribute("data-theme", t);
+    paintChrome(t === "light" ? "#f4f4f8" : "#080810");
+    document.querySelectorAll("#themeSeg .seg-btn").forEach(b => b.classList.toggle("active", b.dataset.themeVal === t));
+    lsSet("ui_theme", t);
+  }
+  function applyAccent(a) {
+    currentAccent = a;
+    const r = document.documentElement.style;
+    r.setProperty("--g1", a.g1); r.setProperty("--g2", a.g2); r.setProperty("--acc-rgb", hexRgb(a.g1));
+    document.querySelectorAll("#swatches .sw").forEach(s => s.classList.toggle("active", s.dataset.acc === a.id));
+    lsSet("ui_accent", a.id);
+    if (mbAction) paintMB();
+  }
+  ACCENTS.forEach(a => {
+    const s = document.createElement("button");
+    s.className = "sw"; s.dataset.acc = a.id; s.setAttribute("aria-label", a.id);
+    s.style.background = `linear-gradient(135deg, ${a.g1}, ${a.g2})`;
+    s.onclick = () => { haptic("selectionChanged"); applyAccent(a); };
+    $("swatches").appendChild(s);
+  });
+  document.querySelectorAll("#themeSeg .seg-btn").forEach(b =>
+    b.onclick = () => { haptic("selectionChanged"); applyTheme(b.dataset.themeVal); });
+
+  // ---------- нижняя кнопка Telegram ----------
+  let mbAction = null, mbText = "";
+  function paintMB() {
+    try { tg.MainButton.setParams({ text: mbText, color: currentAccent.g1, text_color: "#0b0b16", is_visible: true, is_active: true }); }
+    catch { try { tg.MainButton.setText(mbText); tg.MainButton.show(); } catch {} }
+  }
+  function setMB(text, fn) { if (!tg?.MainButton) return; mbAction = fn; mbText = text; paintMB(); }
+  function hideMB() { mbAction = null; try { tg?.MainButton?.hide(); } catch {} }
+
+  // ---------- главная ----------
+  function displayName() { return user ? [user.first_name, user.last_name].filter(Boolean).join(" ") : "Гость"; }
+  function renderHome() {
+    $("uname").textContent = displayName();
+    $("uhandle").textContent = (user?.username ? "@" + user.username + " · " : "") + (isAdmin ? "Оператор" : "Клиент");
+
+    const s = fmt(getBal()), [ip, fp] = s.split(",");
+    $("balAmount").innerHTML = esc(ip) + '<span class="frac">,' + esc(fp) + "</span>";
+    const log = getLog();
+    const inSum = log.filter(e => e.type === "deposit").reduce((a, e) => a + (Number(e.amount) || 0), 0);
+    const outSum = log.filter(e => e.type === "withdraw" || e.type === "cashout").reduce((a, e) => a + (Number(e.amount) || 0), 0);
+    $("balIn").textContent = fmt(inSum);
+    $("balOut").textContent = fmt(outSum);
+
+    const card = $("tgCard");
+    if (canSend) {
+      card.classList.remove("warn-card");
+      $("tgLink").textContent = `✅ Привязан: ${user.username ? "@" + user.username : user.first_name} · id ${user.id}. Ответы по заявкам приходят в чат с ботом.`;
+    } else {
+      card.classList.add("warn-card");
+      $("tgLink").textContent = `⚠️ ${NEED_BOT} — тогда аккаунт привяжется и заработают пополнение и вывод.`;
+    }
+  }
+
+  // ---------- навигация ----------
+  const SUB = ["deposit", "history", "withdraw"];
+  let lastTab = "home", returnTo = "home";
+
+  function show(id) {
+    document.querySelectorAll(".screen").forEach(s => s.classList.toggle("active", s.id === id));
+    window.scrollTo(0, 0);
+    $("toast").classList.remove("show");
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    const isSub = SUB.includes(id);
+    $("tabbar").classList.toggle("hidden", isSub);
+    if (!isSub) {
+      lastTab = id;
+      document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.screen === id));
+    }
+    ({ home: renderHome, history: renderHistory, cabinet: renderCabinet, requisites: renderCashout,
+       deals: renderDeals, profile: renderProfile, deposit: renderDeposit, withdraw: renderWithdraw }[id] || (() => {}))();
+    try { isSub ? tg?.BackButton?.show() : tg?.BackButton?.hide(); } catch {}
+    if (id === "deposit") setMB("Я отправил", submitDeposit);
+    else if (id === "withdraw") setMB("Отправить заявку", submitWithdraw);
+    else hideMB();
+  }
+  function go(id) { if (SUB.includes(id) && !SUB.includes(currentScreen())) returnTo = lastTab; show(id); }
+  function currentScreen() { return document.querySelector(".screen.active")?.id || "home"; }
+  function back() { haptic("impactOccurred", "light"); show(returnTo); }
+
+  document.querySelectorAll(".tab").forEach(t => t.onclick = () => { haptic("selectionChanged"); show(t.dataset.screen); });
+  document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => { haptic("impactOccurred", "light"); go(b.dataset.go); });
+  document.querySelectorAll("[data-open]").forEach(b => b.onclick = () => { haptic("impactOccurred", "medium"); go(b.dataset.open); });
+  document.querySelectorAll("[data-back]").forEach(b => b.onclick = back);
+  try { tg?.BackButton?.onClick(back); } catch {}
+  try { tg?.MainButton?.onClick(() => mbAction && mbAction()); } catch {}
+
+  // прячем нижнее меню, пока открыта клавиатура
+  document.addEventListener("focusin", e => { if (e.target.matches("input")) document.body.classList.add("kb"); });
+  document.addEventListener("focusout", e => { if (e.target.matches("input")) setTimeout(() => {
+    if (!document.activeElement || !document.activeElement.matches("input")) document.body.classList.remove("kb");
+  }, 50); });
+
+  // ---------- поддержка ----------
+  $("supportBtn").onclick = () => {
+    haptic("impactOccurred", "light");
+    const url = "https://t.me/" + SUPPORT;
+    try { tg?.openTelegramLink ? tg.openTelegramLink(url) : window.open(url, "_blank"); } catch { window.open(url, "_blank"); }
+  };
+
+  // ---------- выбор сети ----------
+  function renderNets(boxId, selected, onPick) {
+    const box = $(boxId);
+    box.innerHTML = "";
+    NETWORKS.forEach(n => {
+      const b = document.createElement("button");
+      b.className = "net-btn" + (n.id === selected.id ? " active" : "");
+      b.innerHTML = `<span class="coin">₮</span><span>USDT<small>${esc(n.chain)}</small></span>`;
+      b.onclick = () => { haptic("selectionChanged"); onPick(n); };
+      box.appendChild(b);
+    });
+  }
+
+  // ---------- пополнение ----------
+  let current = NETWORKS[0];
+  function renderDeposit() {
+    renderNets("networks", current, n => { current = n; renderDeposit(); });
+    $("addr").textContent = current.address;
+    $("warn").textContent = `⚠️ Отправляйте только USDT в сети ${current.full}. Другая монета или сеть — средства будут потеряны. Минимум: ${current.min} USDT.`;
+    const q = $("qr");
+    q.innerHTML = "";
+    try { new QRCode(q, { text: current.address, width: 180, height: 180, correctLevel: QRCode.CorrectLevel.M }); }
+    catch { q.style.display = "none"; }
+  }
+
+  $("copyBtn").onclick = async () => {
+    let ok = false;
+    try { await navigator.clipboard.writeText(current.address); ok = true; } catch {}
+    if (!ok) {
+      const ta = document.createElement("textarea");
+      ta.value = current.address; ta.setAttribute("readonly", ""); ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.select();
+      try { ok = document.execCommand("copy"); } catch {}
+      ta.remove();
+    }
+    if (ok) { haptic("notificationOccurred", "success"); toast("Адрес скопирован"); }
+    else err("Не удалось скопировать — выделите адрес вручную");
+  };
+
+  function submitDeposit() {
+    const tx = $("txhash").value.trim();
+    const sum = parseAmt($("amount").value);
+    if (!(sum > 0)) return err("Укажите сумму перевода");
+    if (sum < current.min) return err(`Минимальное пополнение — ${current.min} USDT`);
+    if (tx.length < 6 || /\s/.test(tx)) return err("Вставьте TXID транзакции");
+    if (getLog().some(e => e.type === "deposit" && String(e.tx || "").toLowerCase() === tx.toLowerCase()))
+      return err("Эта транзакция уже отправлена");
+    if (!canSend) return err(NEED_BOT);
+
+    const prevBal = getBal(), prevLog = getLog();
+    setBal(prevBal + sum);
+    addLog({ type: "deposit", amount: sum, chain: current.chain, tx, ts: Date.now() });
+    if (!send({ type: "deposit", network: current.id, chain: current.full, coin: "USDT", tx, amount: sum })) {
+      setBal(prevBal); saveLog(prevLog);
+    }
+  }
+
+  // ---------- вывод USDT ----------
+  let wCurrent = NETWORKS[0];
+  function renderWithdraw() {
+    renderNets("wNetworks", wCurrent, n => { wCurrent = n; renderWithdraw(); });
+    $("wAvail").textContent = fmt(getBal());
+    $("wAddr").placeholder = wCurrent.id === "usdt_trc20" ? "Ваш адрес USDT (T…)" : "Ваш адрес USDT (0x…)";
+    $("wWarn").textContent = `⚠️ Проверьте адрес и сеть (${wCurrent.full}): ${wCurrent.addrHint}. Заявку обработает оператор вручную.`;
+  }
+
+  function submitWithdraw() {
+    const addr = $("wAddr").value.trim();
+    const sum = parseAmt($("wAmount").value);
+    if (!wCurrent.addrRe.test(addr)) return err("Неверный адрес: " + wCurrent.addrHint);
+    if (!(sum > 0)) return err("Укажите сумму");
+    if (sum > getBal()) return err("Сумма больше доступного баланса");
+    if (!canSend) return err(NEED_BOT);
+
+    const prevBal = getBal(), prevLog = getLog();
+    setBal(prevBal - sum);
+    addLog({ type: "withdraw", amount: sum, chain: wCurrent.chain, addr, status: "pending", ts: Date.now() });
+    if (!send({ type: "withdraw", network: wCurrent.id, chain: wCurrent.full, coin: "USDT", addr, amount: sum })) {
+      setBal(prevBal); saveLog(prevLog);
+    }
+  }
+
+  // ---------- вывод на карту (₽, СБП) ----------
+  function renderCashout() {
+    $("rRate").textContent = fmtRub(RUB_RATE);
+    $("rAvail").textContent = fmt(getBal());
+    const usdt = parseAmt($("rAmount").value);
+    $("rRub").textContent = fmtRub(usdt > 0 ? usdt * RUB_RATE : 0) + " ₽";
+  }
+  $("rAmount").addEventListener("input", renderCashout);
+
+  $("rSubmit").onclick = () => {
+    const usdt = parseAmt($("rAmount").value);
+    const bank = $("rBank").value.trim();
+    const fio = $("rFio").value.trim();
+    const phone = $("rPhone").value.trim();
+    const card = $("rCard").value.trim();
+    const phoneDigits = phone.replace(/\D/g, ""), cardDigits = card.replace(/\D/g, "");
+    if (!(usdt > 0)) return err("Укажите сумму в USDT");
+    if (usdt > getBal()) return err("Сумма больше доступного баланса");
+    if (!bank) return err("Укажите банк");
+    if (phone && (phoneDigits.length < 10 || phoneDigits.length > 12)) return err("Проверьте номер телефона");
+    if (card && (cardDigits.length < 16 || cardDigits.length > 19)) return err("Проверьте номер карты");
+    if (!phone && !card) return err("Укажите телефон для СБП или номер карты");
+    if (!canSend) return err(NEED_BOT);
+
+    const rub = Math.round(usdt * RUB_RATE);
+    const prevBal = getBal(), prevLog = getLog();
+    setBal(prevBal - usdt);
+    addLog({ type: "cashout", amount: usdt, rub, rate: RUB_RATE, bank, phone, card, status: "pending", ts: Date.now() });
+    if (!send({ type: "cashout", coin: "USDT", amount: usdt, rub, rate: RUB_RATE, bank, fio, phone, card })) {
+      setBal(prevBal); saveLog(prevLog);
+    }
+  };
+
+  // ---------- история ----------
+  const OP = {
+    deposit:  { ttl: "Пополнение",       cls: "in",  sign: "+", ico: '<path d="M12 4v16M5 13l7 7 7-7"/>' },
+    withdraw: { ttl: "Вывод USDT",       cls: "out", sign: "−", ico: '<path d="M12 20V4M5 11l7-7 7 7"/>' },
+    cashout:  { ttl: "Вывод на карту ₽", cls: "out", sign: "−", ico: '<rect x="2" y="5" width="20" height="14" rx="3"/><path d="M2 10h20"/>' },
+    purchase: { ttl: "Покупка",          cls: "out", sign: "−", ico: '<path d="M6 7h14l-1.5 9h-11z"/><circle cx="9" cy="20" r="1"/><circle cx="17" cy="20" r="1"/>' },
+  };
+  const EMPTY = (icon, text) => `<div class="empty"><div class="ico"><svg class="i" viewBox="0 0 24 24">${icon}</svg></div>${text}</div>`;
+
+  function renderHistory() {
+    const list = getLog();
+    if (!list.length) { $("histList").innerHTML = EMPTY('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>', "Операций пока нет"); return; }
+    $("histList").innerHTML = list.map(e => {
+      const o = OP[e.type] || OP.deposit;
+      const extra = (e.chain ? " · " + esc(e.chain) : "") + (e.addr ? " · " + shortAddr(e.addr) : "") + (e.rub ? " · " + fmtRub(e.rub) + " ₽" : "");
+      return `<div class="op">
+        <div class="op-ico ${o.cls}"><svg class="i" viewBox="0 0 24 24">${o.ico}</svg></div>
+        <div class="op-main"><div class="op-ttl">${o.ttl}</div><div class="op-sub">${fmtDate(e.ts)}${extra}</div></div>
+        <div class="op-amt ${o.cls}">${o.sign}${fmt(e.amount)}</div>
+      </div>`;
+    }).join("");
+  }
+
+  // ---------- сделки ----------
+  const DEAL_STATUS = {
+    pending:  { label: "Заявка оставлена", cls: "st-wait" },
+    done:     { label: "Заявка завершена", cls: "st-done" },
+    rejected: { label: "Отклонена",        cls: "st-rej" },
+  };
+  function renderDeals() {
+    const list = getLog().filter(e => e.type === "cashout");
+    if (!list.length) { $("dealsList").innerHTML = EMPTY('<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>', "Сделок пока не было"); return; }
+    $("dealsList").innerHTML = list.map(e => {
+      const st = DEAL_STATUS[e.status] || DEAL_STATUS.pending;
+      return `<div class="deal">
+        <div class="deal-top"><span class="badge ${st.cls}">${st.label}</span><span class="deal-date">${fmtDate(e.ts)}</span></div>
+        <div class="deal-amt">${fmt(e.amount)} USDT <span class="arrow">→</span> ${fmtRub(e.rub)} ₽</div>
+        <div class="deal-rows">
+          <div><span>Курс</span><b>${fmtRub(e.rate)} ₽ / USDT</b></div>
+          <div><span>Банк</span><b>${esc(e.bank || "—")}</b></div>
+          <div><span>Телефон (СБП)</span><b>${esc(e.phone || "—")}</b></div>
+          ${e.card ? `<div><span>Карта</span><b>${shortCard(e.card)}</b></div>` : ""}
+        </div>
+      </div>`;
+    }).join("");
+  }
+
+  // ---------- кабинет ----------
+  function renderCabinet() {
+    $("cabName").textContent = displayName();
+    $("cabHandle").textContent = user?.username ? "@" + user.username : (user ? "Telegram-аккаунт" : "—");
+    $("cabTg").textContent = canSend ? "привязан ✓" : "не привязан";
+    $("cabId").textContent = user?.id ?? "—";
+    $("cabBal").textContent = fmt(getBal()) + " USDT";
+    paintAvatar($("cabAv"));
+  }
+
+  // ---------- профиль ----------
+  function renderProfile() {
+    $("profName").textContent = displayName();
+    $("profHandle").textContent = user?.username ? "@" + user.username : (user ? "Telegram-аккаунт" : "—");
+    paintAvatar($("profAv"));
+    const deals = getLog().filter(e => e.type === "cashout");
+    $("stDeals").textContent = deals.length;
+    $("stRub").textContent = fmtRub(deals.reduce((s, e) => s + (Number(e.rub) || 0), 0)) + " ₽";
+    $("stUsdt").textContent = fmt(deals.reduce((s, e) => s + (Number(e.amount) || 0), 0));
+    $("adminBox").style.display = isAdmin ? "block" : "none";
+    const ver = tg?.version ? " · Telegram API " + tg.version : "";
+    $("appVer").textContent = "Версия " + APP_VERSION + ver + (canSend ? " · через бота ✓" : " · не через кнопку бота");
+  }
+  $("globalStats").onclick = () => {
+    haptic("impactOccurred", "medium");
+    if (!canSend) return err(NEED_BOT);
+    send({ type: "stats" });
+  };
+
+  // ---------- старт ----------
+  (function init() {
+    applyTheme(lsGet("ui_theme", "dark"));
+    applyAccent(ACCENTS.find(x => x.id === lsGet("ui_accent", "violet")) || ACCENTS[0]);
+    applyAvatar();
+    show("home");
+  })();
+</script>
+</body>
+</html>
