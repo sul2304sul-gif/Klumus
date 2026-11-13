@@ -35,8 +35,14 @@ APP_VERSION = "5"                      # меняй при каждой зали
 bot = Bot(BOT_TOKEN)
 dp = Dispatcher()
 
-# ---------- общая статистика (файл stats.json рядом с ботом) ----------
-STATS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stats.json")
+# ---------- где хранить данные ----------
+# Если в Railway подключён Volume, Railway сам задаёт RAILWAY_VOLUME_MOUNT_PATH —
+# тогда список пользователей и статистика не стираются при обновлении кода.
+DATA_DIR = os.environ.get("RAILWAY_VOLUME_MOUNT_PATH") or os.path.dirname(os.path.abspath(__file__))
+os.makedirs(DATA_DIR, exist_ok=True)
+
+# ---------- общая статистика ----------
+STATS_FILE = os.path.join(DATA_DIR, "stats.json")
 EMPTY_STATS = {
     "dep_usdt": 0.0, "dep_count": 0,
     "cashout_rub": 0.0, "cashout_usdt": 0.0, "cashout_count": 0,
@@ -100,7 +106,7 @@ async def notify_admin(text: str) -> None:
 
 
 # ---------- пользователи (для рекламной рассылки) ----------
-USERS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "users.json")
+USERS_FILE = os.path.join(DATA_DIR, "users.json")
 
 
 def load_users() -> dict:
@@ -315,7 +321,10 @@ async def start(m: Message):
 async def stats_cmd(m: Message):
     if m.from_user.id != ADMIN_ID:
         return
-    await m.answer(stats_text(load_stats()))
+    users = load_users()
+    active = sum(1 for k, v in users.items() if v.get("ads", True) and int(k) != ADMIN_ID)
+    disk = "постоянный диск ✓" if os.environ.get("RAILWAY_VOLUME_MOUNT_PATH") else "⚠️ без постоянного диска — список сотрётся при обновлении"
+    await m.answer(stats_text(load_stats()) + f"\n\n👥 Пользователей: {len(users)} (получают рекламу: {active})\n💾 Хранение: {disk}")
 
 
 @dp.message(F.web_app_data)
@@ -328,6 +337,7 @@ async def on_webapp(m: Message):
         return
 
     u = m.from_user
+    remember_user(u)
     who = f"{u.full_name} (@{u.username or '—'}, id {u.id})"
     t = d.get("type")
 
