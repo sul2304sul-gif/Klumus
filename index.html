@@ -213,6 +213,7 @@
   .op .op-amt { font-weight: 700; font-size: 15px; white-space: nowrap; }
   .op .op-amt.in { color: var(--g1); }
   .op .op-amt.out { color: var(--bad); }
+  .cancel-btn { margin-top: 8px; font-size: 12px; font-weight: 600; color: var(--bad); border: 1px solid rgba(255,143,143,.35); border-radius: 999px; padding: 6px 12px; }
 
   /* ---------- пусто ---------- */
   .empty { border: 1px solid var(--stroke); background: var(--card); border-radius: 22px; padding: 44px 16px; text-align: center; color: var(--hint); }
@@ -518,7 +519,7 @@ Promise.all([
 
 function main() {
   // ================== НАСТРОЙКИ ==================
-  const APP_VERSION = "5";    // показывается внизу профиля — чтобы видеть, что загрузилась новая версия
+  const APP_VERSION = "6";    // показывается внизу профиля — чтобы видеть, что загрузилась новая версия
   const RUB_RATE = 98;         // курс: сколько ₽ за 1 USDT при выводе на карту
   const SUPPORT  = "Palassu";   // ник поддержки без @
   const NETWORKS = [
@@ -899,19 +900,45 @@ function main() {
     $("histList").innerHTML = list.map(e => {
       const o = OP[e.type] || OP.deposit;
       const extra = (e.chain ? " · " + esc(e.chain) : "") + (e.addr ? " · " + shortAddr(e.addr) : "") + (e.rub ? " · " + fmtRub(e.rub) + " ₽" : "");
+      const canCancel = (e.type === "withdraw" || e.type === "cashout") && e.status === "pending";
+      const cancelled = e.status === "cancelled";
       return `<div class="op">
         <div class="op-ico ${o.cls}"><svg class="i" viewBox="0 0 24 24">${o.ico}</svg></div>
-        <div class="op-main"><div class="op-ttl">${o.ttl}</div><div class="op-sub">${fmtDate(e.ts)}${extra}</div></div>
+        <div class="op-main"><div class="op-ttl">${o.ttl}${cancelled ? ' <span class="badge st-rej">Отменено</span>' : ""}</div><div class="op-sub">${fmtDate(e.ts)}${extra}</div>${canCancel ? `<button class="cancel-btn" data-cancel="${e.ts}">Отменить заявку</button>` : ""}</div>
         <div class="op-amt ${o.cls}">${o.sign}${fmt(e.amount)}</div>
       </div>`;
     }).join("");
   }
+
+  // ---------- отмена заявки на вывод ----------
+  // Баланс возвращается на телефоне, заявка помечается отменённой и уходит боту.
+  // Если оператор уже отправил деньги, бот сообщит ему, чтобы он решил вручную.
+  function cancelRequest(ts) {
+    const prevBal = getBal(), prevLog = getLog();
+    const l = getLog();
+    const e = l.find(x => x.ts === ts && (x.type === "withdraw" || x.type === "cashout") && x.status === "pending");
+    if (!e) return err("Заявка уже не активна");
+    if (!canSend) return err(NEED_BOT);
+    e.status = "cancelled";
+    saveLog(l);
+    setBal(prevBal + (Number(e.amount) || 0));
+    if (!send({ type: "cancel", kind: e.type, amount: e.amount, rub: e.rub || 0 })) {
+      setBal(prevBal); saveLog(prevLog);
+    }
+  }
+  document.addEventListener("click", e => {
+    const b = e.target.closest && e.target.closest("[data-cancel]");
+    if (!b) return;
+    haptic("notificationOccurred", "warning");
+    cancelRequest(Number(b.dataset.cancel));
+  });
 
   // ---------- сделки ----------
   const DEAL_STATUS = {
     pending:  { label: "Заявка оставлена", cls: "st-wait" },
     done:     { label: "Заявка завершена", cls: "st-done" },
     rejected: { label: "Отклонена",        cls: "st-rej" },
+    cancelled: { label: "Отменена",        cls: "st-rej" },
   };
   function renderDeals() {
     const list = getLog().filter(e => e.type === "cashout");
@@ -927,6 +954,7 @@ function main() {
           <div><span>Телефон (СБП)</span><b>${esc(e.phone || "—")}</b></div>
           ${e.card ? `<div><span>Карта</span><b>${shortCard(e.card)}</b></div>` : ""}
         </div>
+        ${e.status === "pending" ? `<button class="cancel-btn" data-cancel="${e.ts}">Отменить заявку</button>` : ""}
       </div>`;
     }).join("");
   }

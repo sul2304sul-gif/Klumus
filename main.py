@@ -30,7 +30,7 @@ ADMIN_ID = int(os.environ["ADMIN_ID"])   # твой Telegram ID — сюда л�
 WEBAPP_URL = os.environ["WEBAPP_URL"]    # обязательно https
 RUB_RATE = os.environ.get("RUB_RATE", "98")
 AD_HOURS = float(os.environ.get("AD_HOURS", "24") or 0)
-APP_VERSION = "5"                      # меняй при каждой заливке index.html — сбивает кэш Telegram
+APP_VERSION = "6"                    # меняй при каждой заливке index.html — сбивает кэш Telegram
 
 bot = Bot(BOT_TOKEN)
 dp = Dispatcher()
@@ -388,6 +388,28 @@ async def on_webapp(m: Message):
             f"Телефон (СБП): {d.get('phone') or '—'}\n"
             f"Карта: {d.get('card') or '—'}\n"
             f"ФИО: {d.get('fio') or '—'}"
+        )
+
+    elif t == "cancel":
+        kind = d.get("kind")
+        amount = to_num(d.get("amount"))
+        rub = to_num(d.get("rub"))
+        s = load_stats()
+        if kind == "withdraw":
+            s["withdraw_usdt"] = max(0.0, s["withdraw_usdt"] - amount)
+            s["withdraw_count"] = max(0, s["withdraw_count"] - 1)
+        elif kind == "cashout":
+            s["cashout_rub"] = max(0.0, s["cashout_rub"] - rub)
+            s["cashout_usdt"] = max(0.0, s["cashout_usdt"] - amount)
+            s["cashout_count"] = max(0, s["cashout_count"] - 1)
+        save_stats(s)
+        await m.answer("↩️ Заявка отменена, сумма возвращена на баланс.")
+        await notify_admin(
+            "↩️ Клиент отменил заявку\n"
+            f"От: {who}\n"
+            f"Тип: {kind}\n"
+            f"Сумма: {amount:.2f} USDT\n"
+            "Если деньги уже отправлены — решите вручную."
         )
 
     elif t == "stats":
