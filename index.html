@@ -432,6 +432,17 @@
   <p class="hint-note" id="appVer" style="text-align:center;margin-top:28px"></p>
 </section>
 
+<!-- ===== ПОДДЕРЖКА ===== -->
+<section class="screen" id="support">
+  <button class="scr-back" data-back><svg class="i" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>Назад</button>
+  <h1>Поддержка</h1>
+  <p class="sub">Напишите вопрос — оператор ответит в чате с ботом.</p>
+  <div class="fields">
+    <input id="supMsg" placeholder="Ваш вопрос" autocomplete="off">
+  </div>
+  <p class="hint-note">Ответ придёт в чат с ботом. Сообщение уходит оператору только после нажатия кнопки внизу.</p>
+</section>
+
 <!-- ===== ПОПОЛНЕНИЕ ===== -->
 <section class="screen" id="deposit">
   <button class="scr-back" data-back><svg class="i" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>Назад</button>
@@ -519,7 +530,7 @@ Promise.all([
 
 function main() {
   // ================== НАСТРОЙКИ ==================
-  const APP_VERSION = "6";    // показывается внизу профиля — чтобы видеть, что загрузилась новая версия
+  const APP_VERSION = "7";    // показывается внизу профиля — чтобы видеть, что загрузилась новая версия
   const RUB_RATE = 98;         // курс: сколько ₽ за 1 USDT при выводе на карту
   const SUPPORT  = "Palassu";   // ник поддержки без @
   const NETWORKS = [
@@ -725,7 +736,7 @@ function main() {
   }
 
   // ---------- навигация ----------
-  const SUB = ["deposit", "history", "withdraw"];
+  const SUB = ["deposit", "history", "withdraw", "support"];
   let lastTab = "home", returnTo = "home";
 
   function show(id) {
@@ -744,6 +755,7 @@ function main() {
     try { isSub ? tg?.BackButton?.show() : tg?.BackButton?.hide(); } catch {}
     if (id === "deposit") setMB("Я отправил", submitDeposit);
     else if (id === "withdraw") setMB("Отправить заявку", submitWithdraw);
+    else if (id === "support") setMB("Отправить", submitSupport);
     else hideMB();
   }
   function go(id) { if (SUB.includes(id) && !SUB.includes(currentScreen())) returnTo = lastTab; show(id); }
@@ -766,8 +778,7 @@ function main() {
   // ---------- поддержка ----------
   $("supportBtn").onclick = () => {
     haptic("impactOccurred", "light");
-    const url = "https://t.me/" + SUPPORT;
-    try { tg?.openTelegramLink ? tg.openTelegramLink(url) : window.open(url, "_blank"); } catch { window.open(url, "_blank"); }
+    go("support");
   };
 
   // ---------- выбор сети ----------
@@ -850,6 +861,15 @@ function main() {
     if (!send({ type: "withdraw", network: wCurrent.id, chain: wCurrent.full, coin: "USDT", addr, amount: sum })) {
       setBal(prevBal); saveLog(prevLog);
     }
+  }
+
+  // ---------- поддержка внутри приложения ----------
+  // Сообщение уходит боту, оператор отвечает командой /reply — ответ приходит в чат с ботом.
+  function submitSupport() {
+    const msg = $("supMsg").value.trim();
+    if (msg.length < 3) return err("Напишите сообщение");
+    if (!canSend) return err(NEED_BOT);
+    if (!send({ type: "support", text: msg.slice(0, 1000) })) return;
   }
 
   // ---------- вывод на карту (₽, СБП) ----------

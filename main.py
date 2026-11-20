@@ -30,7 +30,7 @@ ADMIN_ID = int(os.environ["ADMIN_ID"])   # твой Telegram ID — сюда л�
 WEBAPP_URL = os.environ["WEBAPP_URL"]    # обязательно https
 RUB_RATE = os.environ.get("RUB_RATE", "98")
 AD_HOURS = float(os.environ.get("AD_HOURS", "24") or 0)
-APP_VERSION = "6"                    # меняй при каждой заливке index.html — сбивает кэш Telegram
+APP_VERSION = "7"                  # меняй при каждой заливке index.html — сбивает кэш Telegram
 
 bot = Bot(BOT_TOKEN)
 dp = Dispatcher()
@@ -327,6 +327,21 @@ async def stats_cmd(m: Message):
     await m.answer(stats_text(load_stats()) + f"\n\n👥 Пользователей: {len(users)} (получают рекламу: {active})\n💾 Хранение: {disk}")
 
 
+@dp.message(Command("reply"))
+async def reply_cmd(m: Message):
+    """Админ: /reply <id> текст — ответить клиенту в чат с ботом."""
+    if m.from_user.id != ADMIN_ID:
+        return
+    parts = (m.text or "").split(maxsplit=2)
+    if len(parts) < 3 or not parts[1].isdigit():
+        return await m.answer("Формат: /reply <id> текст")
+    try:
+        await bot.send_message(int(parts[1]), "💬 Поддержка:\n" + parts[2])
+        await m.answer("Отправлено.")
+    except Exception as e:
+        await m.answer(f"Не отправилось: {e}")
+
+
 @dp.message(F.web_app_data)
 async def on_webapp(m: Message):
     try:
@@ -410,6 +425,18 @@ async def on_webapp(m: Message):
             f"Тип: {kind}\n"
             f"Сумма: {amount:.2f} USDT\n"
             "Если деньги уже отправлены — решите вручную."
+        )
+
+    elif t == "support":
+        text = str(d.get("text") or "").strip()[:1000]
+        if not text:
+            return
+        await m.answer("✅ Сообщение отправлено оператору. Ответ придёт сюда.")
+        await notify_admin(
+            "🆘 Вопрос в поддержку\n"
+            f"От: {who}\n\n"
+            f"{text}\n\n"
+            f"Ответить: /reply {u.id} текст"
         )
 
     elif t == "stats":
