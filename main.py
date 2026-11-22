@@ -16,7 +16,7 @@ import logging
 import os
 from urllib.parse import urlencode
 
-from aiogram import Bot, Dispatcher, F
+from aiogram import BaseMiddleware, Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
 from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
 from aiogram.types import (CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup,
@@ -125,6 +125,38 @@ def save_users(u: dict) -> None:
     os.replace(tmp, USERS_FILE)
 
 
+# ---------- блокировка пользователей: /ban <id>, /unban <id> ----------
+BANNED_FILE = os.path.join(DATA_DIR, "banned.json")
+
+
+def load_banned() -> set:
+    try:
+        with open(BANNED_FILE, encoding="utf-8") as f:
+            return {int(x) for x in json.load(f)}
+    except (FileNotFoundError, json.JSONDecodeError, ValueError, TypeError):
+        return set()
+
+
+def save_banned(s: set) -> None:
+    tmp = BANNED_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(sorted(s), f)
+    os.replace(tmp, BANNED_FILE)
+
+
+class BanMiddleware(BaseMiddleware):
+    """Заблокированные не получают ответа и не проходят в обработчики."""
+    async def __call__(self, handler, event, data):
+        user = getattr(event, "from_user", None)
+        if user and user.id != ADMIN_ID and user.id in load_banned():
+            return None
+        return await handler(event, data)
+
+
+dp.message.middleware(BanMiddleware())
+dp.callback_query.middleware(BanMiddleware())
+
+
 def remember_user(user) -> None:
     u = load_users()
     rec = u.get(str(user.id), {"ads": True})
@@ -171,9 +203,10 @@ async def send_ad(chat_id: int) -> bool:
 
 async def broadcast_ads() -> int:
     users = load_users()
+    banned = load_banned()
     sent = 0
     for uid, rec in list(users.items()):
-        if not rec.get("ads", True) or int(uid) == ADMIN_ID:
+        if not rec.get("ads", True) or int(uid) == ADMIN_ID or int(uid) in banned:
             continue
         if await send_ad(int(uid)):
             sent += 1
@@ -292,9 +325,10 @@ async def post_button(c: CallbackQuery):
     await c.message.edit_text("📤 Рассылаю…")
     await c.answer()
     users = load_users()
+    banned = load_banned()
     ok = fail = 0
     for uid in list(users):
-        if int(uid) == ADMIN_ID:
+        if int(uid) == ADMIN_ID or int(uid) in banned:
             continue
         try:
             await bot.copy_message(int(uid), c.message.chat.id, msg_id)
@@ -325,6 +359,37 @@ async def stats_cmd(m: Message):
     active = sum(1 for k, v in users.items() if v.get("ads", True) and int(k) != ADMIN_ID)
     disk = "постоянный диск ✓" if os.environ.get("RAILWAY_VOLUME_MOUNT_PATH") else "⚠️ без постоянного диска — список сотрётся при обновлении"
     await m.answer(stats_text(load_stats()) + f"\n\n👥 Пользователей: {len(users)} (получают рекламу: {active})\n💾 Хранение: {disk}")
+
+
+@dp.message(Command("ban"))
+async def ban_cmd(m: Message):
+    """Админ: /ban <id> — бот перестаёт отвечать и принимать данные от этого человека."""
+    if m.from_user.id != ADMIN_ID:
+        return
+    parts = (m.text or "").split()
+    if len(parts) < 2 or not parts[1].isdigit():
+        return await m.answer("Формат: /ban <id>")
+    uid = int(parts[1])
+    if uid == ADMIN_ID:
+        return await m.answer("Себя банить нельзя.")
+    s = load_banned()
+    s.add(uid)
+    save_banned(s)
+    await m.answer(f"🚫 {uid} заблокирован. Бот ему не отвечает и не принимает заявки.")
+
+
+@dp.message(Command("unban"))
+async def unban_cmd(m: Message):
+    """Админ: /unban <id> — снять блокировку."""
+    if m.from_user.id != ADMIN_ID:
+        return
+    parts = (m.text or "").split()
+    if len(parts) < 2 or not parts[1].isdigit():
+        return await m.answer("Формат: /unban <id>")
+    s = load_banned()
+    s.discard(int(parts[1]))
+    save_banned(s)
+    await m.answer(f"✅ {parts[1]} разблокирован.")
 
 
 @dp.message(Command("reply"))
